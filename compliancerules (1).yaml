@@ -1,0 +1,102 @@
+rules:
+
+  - id: SQL_INJECTION
+    severity: HIGH
+    description: >
+      Raw string concatenation in JPQL, native queries, or JDBC.
+      Patterns: String query = "SELECT ... " + userInput,
+      @Query("... WHERE name = '" + param + "'"), Statement.execute(rawSql).
+    recommendation: >
+      Use named parameters (:param) in @Query, JdbcTemplate with PreparedStatement,
+      or Spring Data method naming. Never concatenate user input into query strings.
+
+  - id: LOG_INJECTION
+    severity: HIGH
+    description: >
+      User-controlled input written directly to log statements without sanitisation.
+      Allows attackers to forge log entries (CRLF injection), corrupt log aggregators
+      (Splunk, ELK), or trigger Log4Shell-style payloads (${jndi:...}).
+      Patterns:
+        log.info("User: " + request.getParameter("username"))
+        logger.debug(userInput)
+        log.error("Request body: " + body)
+        log.warn("Path: " + request.getRequestURI())
+      Any logging call where the argument contains unsanitised request params,
+      path variables, headers, cookies, or user-supplied strings.
+    recommendation: >
+      1. Strip CR/LF before logging: input.replaceAll("[\r\n]", "_")
+      2. Use parameterised SLF4J: log.info("User: {}", sanitise(input))
+      3. Never log raw request.getParameter() or HttpServletRequest fields directly.
+      4. If on Log4j 2.x: set -Dlog4j2.formatMsgNoLookups=true in JVM args.
+      5. Use structured logging (logstash-logback-encoder) which auto-escapes values.
+
+  - id: HARDCODED_CREDENTIALS
+    severity: HIGH
+    description: >
+      Literal passwords, API keys, tokens, or connection strings in source code.
+      Patterns: password = "...", apiKey = "...", secret = "...",
+      jdbc:oracle:thin:user/pass@host, Authorization header with literal token.
+    recommendation: >
+      Use environment variables via @Value("${prop}") or Spring Cloud Config.
+      Never commit credentials. Use a secrets manager (Vault, AWS Secrets Manager).
+
+  - id: MISSING_AUTHENTICATION
+    severity: HIGH
+    description: >
+      REST endpoints lacking Spring Security annotations (@PreAuthorize, @Secured,
+      @RolesAllowed) and not covered by a SecurityFilterChain rule.
+    recommendation: >
+      Add @PreAuthorize("isAuthenticated()") or role expressions on every endpoint.
+      Audit SecurityFilterChain to ensure no endpoint is accidentally open.
+
+  - id: MISSING_TRANSACTIONAL
+    severity: MEDIUM
+    description: >
+      Service methods that write data (save, update, delete, merge, flush)
+      without @Transactional, risking partial writes on failure.
+    recommendation: >
+      Add @Transactional on service methods that write to the database.
+      Use @Transactional(readOnly = true) on read-only methods for Oracle performance.
+
+  - id: MISSING_INPUT_VALIDATION
+    severity: MEDIUM
+    description: >
+      REST controller methods accepting @RequestBody or @RequestParam
+      without @Valid or @Validated, allowing unvalidated input into the system.
+    recommendation: >
+      Add @Valid to @RequestBody parameters. Add @Validated at the controller class
+      for @RequestParam constraints. Define constraints on DTOs with @NotNull, @Size.
+
+  - id: EXCEPTION_EXPOSURE
+    severity: MEDIUM
+    description: >
+      Exception stack traces or internal messages returned in HTTP responses.
+      Patterns: ResponseEntity.badRequest().body(e.getMessage()),
+      return e.getStackTrace(), printing stack trace into response stream.
+    recommendation: >
+      Return generic error DTOs with safe user-facing messages.
+      Log the full exception server-side with a correlation ID.
+      Use @ControllerAdvice + @ExceptionHandler for centralised handling.
+
+  - id: SENSITIVE_LOGGING
+    severity: MEDIUM
+    description: >
+      Logging of passwords, tokens, SSNs, credit card numbers, or PII.
+      Patterns: log.info("password: " + ...), logger.debug(user.getPassword()),
+      log.info(objectMapper.writeValueAsString(entityWithSensitiveFields)).
+      Note: Lombok @ToString includes all fields by default — check @Entity classes.
+    recommendation: >
+      Mask or omit sensitive fields before logging.
+      Use @JsonIgnore or a custom masking serialiser on sensitive DTO fields.
+      Annotate sensitive entity fields with @ToString.Exclude (Lombok).
+
+  - id: ORACLE_CONNECTION_POOL
+    severity: LOW
+    description: >
+      Oracle datasource without explicit HikariCP settings
+      (maximumPoolSize, connectionTimeout, idleTimeout, connectionTestQuery).
+      Default settings are often suboptimal for Oracle.
+    recommendation: >
+      Set spring.datasource.hikari.maximum-pool-size, connection-timeout,
+      idle-timeout, and connection-test-query=SELECT 1 FROM DUAL in application.yml.
+      Monitor pool exhaustion via HikariCP JMX or Actuator metrics.
