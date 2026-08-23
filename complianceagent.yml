@@ -1,0 +1,89 @@
+name: Compliance Memory Agent
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "**/*.java"
+      - "pom.xml"
+      - "build.gradle"
+      - "build.gradle.kts"
+
+jobs:
+  compliance-scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      # fetch-depth: 2 gives us HEAD and HEAD~1 for the diff
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # Memory persists across runs via GitHub Actions cache.
+      # Cache key includes branch so main and develop have separate histories.
+      - name: Restore compliance memory
+        uses: actions/cache@v4
+        with:
+          path: .compliance-memory/
+          key: compliance-memory-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            compliance-memory-${{ github.ref_name }}-
+            compliance-memory-
+
+      - name: Run compliance agent
+        env:
+          # ── PICK YOUR PROVIDER ──────────────────────────────────────────────
+          #
+          # Claude (Anthropic) — default
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          #
+          # OpenAI / Codex — uncomment + set secret
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          #
+          # GitHub Copilot / Azure OpenAI — uncomment + set secrets
+          # AZURE_API_KEY:     ${{ secrets.AZURE_API_KEY }}
+          # AZURE_API_BASE:    ${{ secrets.AZURE_API_BASE }}
+          # AZURE_API_VERSION: "2024-02-15-preview"
+          #
+          # ── MODEL SELECTION ─────────────────────────────────────────────────
+          # Set LLM_MODEL in repo Settings → Variables → Actions
+          # Examples:
+          #   claude-opus-4-5          (Claude — default)
+          #   claude-sonnet-4-5        (faster, cheaper Claude)
+          #   gpt-4o                   (OpenAI)
+          #   azure/gpt-4o             (Azure / Copilot)
+          #   openai/gpt-3.5-turbo     (Codex)
+          LLM_MODEL: ${{ vars.LLM_MODEL || 'claude-opus-4-5' }}
+
+          # Set to "true" to block CI merges on any HIGH finding
+          COMPLIANCE_FAIL_ON_HIGH: ${{ vars.COMPLIANCE_FAIL_ON_HIGH || 'false' }}
+
+        run: python compliance_agent.py
+
+      # Always save memory even if the scan found violations
+      - name: Save compliance memory
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: .compliance-memory/
+          key: compliance-memory-${{ github.ref_name }}-${{ github.run_id }}
+
+      # Upload run JSON files as a CI artefact (90-day retention)
+      - name: Upload compliance report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compliance-report-${{ github.sha }}
+          path: .compliance-memory/runs/
+          retention-days: 90
